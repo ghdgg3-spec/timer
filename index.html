@@ -239,9 +239,9 @@
   </div>
 
   <h3>종소리</h3>
-  <div class="row"><label>종료 5분 전 (땡 1번)</label><input type="checkbox" id="ckBell5" checked></div>
-  <div class="row"><label>종료 1분 전 (땡 2번)</label><input type="checkbox" id="ckBell1" checked></div>
-  <div class="row"><label>종료 시 (땡 3번)</label><input type="checkbox" id="ckBellEnd" checked></div>
+  <div class="row"><label>종료 5분 전</label><input type="checkbox" id="ckBell5" checked></div>
+  <div class="row"><label>종료 1분 전</label><input type="checkbox" id="ckBell1" checked></div>
+  <div class="row"><label>종료 시</label><input type="checkbox" id="ckBellEnd" checked></div>
   <div class="row"><label>음량</label><input type="range" id="inVolume" min="0" max="100" value="80"><button id="btnTestBell" class="btn">테스트</button></div>
   <p class="note">5분 전 알림은 설정 시간이 5분보다 길 때, 1분 전 알림은 1분보다 길 때만 울립니다.</p>
 
@@ -344,7 +344,7 @@ function ding(when = 0) {
   const ng = audioCtx.createGain(); ng.gain.value = vol * 0.25;
   src.connect(ng).connect(audioCtx.destination); src.start(t0);
 }
-function bell(count) { for (let i = 0; i < count; i++) ding(i * 0.9); }
+function bell() { ding(); }
 
 /* ============================== timer core ============================== */
 function remaining() {
@@ -437,7 +437,7 @@ function finish() {
   // endAt 유지 → 초과 시간 계산에 사용
   state.status = "finished";
   state.rev++; state.origin = clientId; broadcast();
-  if (cfg.bellEnd) bell(3);
+  if (cfg.bellEnd) bell();
 }
 
 /* ============================== render ============================== */
@@ -495,8 +495,8 @@ function tick() {
   if (state.status === "running") {
     const rem = remaining();
     // 종소리: 임계값을 위→아래로 지나는 순간 1회 (시작 시점 잔여시간이 임계값보다 길 때만 무장됨)
-    if (cfg.bell5 && bellFired.b5 === "armed" && rem <= 300000) { bellFired.b5 = true; bell(1); }
-    if (cfg.bell1 && bellFired.b1 === "armed" && rem <= 60000) { bellFired.b1 = true; bell(2); }
+    if (cfg.bell5 && bellFired.b5 === "armed" && rem <= 300000) { bellFired.b5 = true; bell(); }
+    if (cfg.bell1 && bellFired.b1 === "armed" && rem <= 60000) { bellFired.b1 = true; bell(); }
     if (rem > 300000 + 500) bellFired.b5 = "armed";
     if (rem > 60000 + 500) bellFired.b1 = "armed";
     if (rem <= 0) finish();
