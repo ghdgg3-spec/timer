@@ -83,6 +83,7 @@
   body.ended #timeDisplay{color:var(--warn1)}
   body.blink #timeDisplay{animation:blink 1s steps(2,start) infinite}
   @keyframes blink{50%{opacity:.25}}
+  body.editing #timeDisplay{color:var(--accent);border-bottom:.06em solid var(--accent)}
 
   #progressWrap{
     width:min(70vw,900px);height:6px;border-radius:3px;
@@ -223,7 +224,7 @@
   <div id="presets"></div>
 </main>
 
-<div id="hint">시간 클릭 = 시작/정지 · <kbd>Space</kbd> 시작/정지 · <kbd>R</kbd> 초기화 · <kbd>F</kbd> 전체화면 · <kbd>↑</kbd><kbd>↓</kbd> ±1분</div>
+<div id="hint">숫자키로 시간 직접 입력 (예: 1→5→0→0 = 15:00, <kbd>Enter</kbd> 적용) · 시간 클릭 = 시작/정지 · <kbd>Space</kbd> 시작/정지 · <kbd>R</kbd> 초기화 · <kbd>F</kbd> 전체화면 · <kbd>↑</kbd><kbd>↓</kbd> ±1분</div>
 
 <div id="overlay"></div>
 <aside id="settings">
@@ -271,6 +272,8 @@
 
   <h3>단축키</h3>
   <p class="note">
+    <kbd>0</kbd>~<kbd>9</kbd> 시간 직접 입력 — 오른쪽부터 채워집니다. 예: <kbd>1</kbd><kbd>5</kbd><kbd>0</kbd><kbd>0</kbd> = 15:00, <kbd>1</kbd><kbd>3</kbd><kbd>0</kbd> = 1:30.<br>
+    입력 중 <kbd>Enter</kbd> 적용 · <kbd>Space</kbd> 적용 후 바로 시작 · <kbd>Backspace</kbd> 지우기 · <kbd>Esc</kbd> 취소<br>
     <kbd>Space</kbd> 시작/일시정지 &nbsp; <kbd>R</kbd> 초기화 &nbsp; <kbd>F</kbd> 전체화면<br>
     <kbd>↑</kbd>/<kbd>↓</kbd> 1분 늘리기/줄이기 &nbsp; <kbd>M</kbd> 소리 켜기/끄기<br>
     숫자 그 자체를 클릭해도 시작/일시정지 됩니다.
@@ -397,6 +400,39 @@ function adjust(deltaMs) {
   });
   cfg.lastDurationMs = state.durationMs; saveCfg();
 }
+/* ---------- 키보드 직접 입력 (휴대폰 타이머 방식: 오른쪽부터 채움) ---------- */
+let editBuf = null; // 입력 중인 숫자 문자열, null = 입력 모드 아님
+
+function editDigit(d) {
+  if (state.status === "running") return;      // 진행 중에는 오입력 방지
+  editBuf = ((editBuf || "") + d).slice(-6);   // 최대 6자리 (H:MM:SS)
+  render();
+}
+function editBackspace() {
+  if (editBuf === null) return;
+  editBuf = editBuf.slice(0, -1);
+  if (editBuf === "") editBuf = null;
+  render();
+}
+function editCancel() { editBuf = null; render(); }
+function editMs() {
+  const d = (editBuf || "").padStart(6, "0");
+  return (+d.slice(0, 2)) * 3600000 + (+d.slice(2, 4)) * 60000 + (+d.slice(4, 6)) * 1000;
+}
+function fmtEdit() {
+  const d = (editBuf || "").padStart(6, "0");
+  const h = +d.slice(0, 2);
+  return (h > 0 ? h + ":" : "") + d.slice(2, 4) + ":" + d.slice(4, 6);
+}
+function editApply(andStart) {
+  if (editBuf === null) return false;
+  const ms = editMs();
+  editBuf = null;
+  if (ms > 0) { setDuration(ms); if (andStart) start(); }
+  else render();
+  return true;
+}
+
 function finish() {
   // endAt 유지 → 초과 시간 계산에 사용
   state.status = "finished";
@@ -416,6 +452,17 @@ function fmt(ms) {
 const disp = $("timeDisplay"), label = $("statusLabel"), bar = $("progressBar");
 
 function render() {
+  const b = document.body;
+  b.classList.toggle("editing", editBuf !== null);
+  if (editBuf !== null) {
+    const text = fmtEdit();
+    disp.textContent = text;
+    disp.classList.toggle("long", text.length > 5);
+    label.textContent = "시간 입력 · Enter 적용 · Space 바로 시작 · Esc 취소";
+    b.classList.remove("warn5", "warn1", "ended", "blink");
+    bar.style.width = "0%";
+    return;
+  }
   const rem = remaining();
   const showMs = (state.status === "finished" && cfg.overtime) ? rem : Math.max(0, rem);
   const text = (state.status === "finished" && !cfg.overtime) ? "00:00" : fmt(showMs);
@@ -426,7 +473,6 @@ function render() {
 
   label.textContent = { idle: "대기 중", running: "진행 중", paused: "일시정지", finished: "시간 종료" }[state.status];
 
-  const b = document.body;
   const active = state.status === "running" || state.status === "paused";
   b.classList.toggle("ended", state.status === "finished");
   b.classList.toggle("warn1", cfg.warnColor && active && rem <= 60000 && rem > 0);
@@ -585,8 +631,8 @@ function syncTimeInputs() {
   $("inSec").value = Math.floor(state.durationMs / 1000) % 60;
 }
 
-disp.addEventListener("click", toggle);
-$("btnStart").addEventListener("click", toggle);
+disp.addEventListener("click", () => { if (!editApply(false)) toggle(); });
+$("btnStart").addEventListener("click", () => { if (editBuf !== null) editApply(true); else toggle(); });
 $("btnReset").addEventListener("click", reset);
 $("btnPlus").addEventListener("click", () => adjust(60000));
 $("btnMinus").addEventListener("click", () => adjust(-60000));
@@ -612,6 +658,9 @@ overlay.addEventListener("click", closeSettings);
 $("btnApplyTime").addEventListener("click", () => {
   setDuration((+$("inMin").value || 0) * 60000 + (+$("inSec").value || 0) * 1000);
 });
+["inMin", "inSec"].forEach(id => $(id).addEventListener("keydown", e => {
+  if (e.key === "Enter") $("btnApplyTime").click();
+}));
 
 // 종소리 설정
 function bindCheck(id, key) {
@@ -683,13 +732,16 @@ function showChrome() {
 // 단축키
 document.addEventListener("keydown", e => {
   if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
-  if (e.code === "Space") { e.preventDefault(); toggle(); }
+  if (/^[0-9]$/.test(e.key)) { e.preventDefault(); editDigit(e.key); }
+  else if (e.key === "Backspace" && editBuf !== null) { e.preventDefault(); editBackspace(); }
+  else if (e.key === "Enter" && editBuf !== null) { e.preventDefault(); editApply(false); }
+  else if (e.code === "Space") { e.preventDefault(); if (!editApply(true)) toggle(); }
   else if (e.key === "r" || e.key === "R" || e.key === "ㄱ") reset();
   else if (e.key === "f" || e.key === "F" || e.key === "ㄹ") toggleFullscreen();
   else if (e.key === "m" || e.key === "M" || e.key === "ㅡ") { ensureAudio(); setMuted(!cfg.muted); }
   else if (e.key === "ArrowUp") { e.preventDefault(); adjust(60000); }
   else if (e.key === "ArrowDown") { e.preventDefault(); adjust(-60000); }
-  else if (e.key === "Escape") closeSettings();
+  else if (e.key === "Escape") { if (editBuf !== null) editCancel(); else closeSettings(); }
 });
 
 // 진행 중 화면 꺼짐 방지
