@@ -1,0 +1,13 @@
+{
+  "name": "committee-timer",
+  "version": "1.0.0",
+  "description": "평가위원회용 발표 타이머 — 전체화면, 종소리 알림, 다중 화면 동기화",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
