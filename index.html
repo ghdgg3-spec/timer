@@ -318,22 +318,22 @@ function ensureAudio() {
   if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
   if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
 }
-// 짧고 굵은 "땡" — 타종 합성음
+// 짧고 경쾌한 "땡" — 솔(G5) 기준 타종 합성음
 function ding(when = 0) {
   if (!audioCtx || cfg.muted) return;
   const t0 = audioCtx.currentTime + when;
   const vol = (cfg.volume / 100) * 0.9;
-  const partials = [[523.25, 1], [1046.5, 0.45], [1567.98, 0.22], [2093, 0.1]];
+  const partials = [[783.99, 1], [1567.98, 0.5], [2349.32, 0.25], [3135.96, 0.12]];
   for (const [freq, gain] of partials) {
     const o = audioCtx.createOscillator();
     const g = audioCtx.createGain();
     o.type = "sine";
     o.frequency.value = freq;
     g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(vol * gain, t0 + 0.008);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.3);
+    g.gain.exponentialRampToValueAtTime(vol * gain, t0 + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.0);
     o.connect(g).connect(audioCtx.destination);
-    o.start(t0); o.stop(t0 + 1.4);
+    o.start(t0); o.stop(t0 + 1.1);
   }
   // 타격감(스트라이크)용 노이즈
   const len = Math.floor(audioCtx.sampleRate * 0.03);
