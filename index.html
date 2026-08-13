@@ -122,6 +122,14 @@
   .chip.active{background:var(--accent);border-color:var(--accent);color:#fff}
 
   #hint{position:fixed;bottom:12px;left:0;right:0;text-align:center;font-size:12px;color:var(--muted);opacity:.7;transition:opacity .3s}
+  #audioHint{
+    position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:25;
+    background:var(--warn5);color:#1a1200;
+    padding:10px 18px;border-radius:999px;font-size:14px;font-weight:600;
+    box-shadow:0 4px 20px rgba(0,0,0,.35);
+    pointer-events:none;
+  }
+  .iconbtn.muted{color:var(--warn1)}
 
   /* fullscreen: auto-hide chrome */
   body.hidechrome #topbar,
@@ -224,6 +232,8 @@
   <div id="presets"></div>
 </main>
 
+<div id="audioHint" class="hidden">🔔 종소리를 켜려면 화면 아무 곳이나 한 번 클릭하세요</div>
+
 <div id="hint">숫자키로 시간 직접 입력 (예: 1→5→0→0 = 15:00, <kbd>Enter</kbd> 적용) · 시간 클릭 = 시작/정지 · <kbd>Space</kbd> 시작/정지 · <kbd>R</kbd> 초기화 · <kbd>F</kbd> 전체화면 · <kbd>↑</kbd><kbd>↓</kbd> ±1분</div>
 
 <div id="overlay"></div>
@@ -316,35 +326,54 @@ const now = () => Date.now() + clockOffset;
 let audioCtx = null;
 function ensureAudio() {
   if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
-  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  if (audioCtx && audioCtx.state === "suspended") { try { audioCtx.resume().catch(() => {}); } catch (e) {} }
+  updateAudioBanner();
 }
 // 짧고 경쾌한 "땡" — 솔(G5) 기준 타종 합성음
 function ding(when = 0) {
-  if (!audioCtx || cfg.muted) return;
-  const t0 = audioCtx.currentTime + when;
-  const vol = (cfg.volume / 100) * 0.9;
-  const partials = [[783.99, 1], [1567.98, 0.5], [2349.32, 0.25], [3135.96, 0.12]];
-  for (const [freq, gain] of partials) {
-    const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    o.type = "sine";
-    o.frequency.value = freq;
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(vol * gain, t0 + 0.006);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.0);
-    o.connect(g).connect(audioCtx.destination);
-    o.start(t0); o.stop(t0 + 1.1);
-  }
-  // 타격감(스트라이크)용 노이즈
-  const len = Math.floor(audioCtx.sampleRate * 0.03);
-  const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
-  const d = buf.getChannelData(0);
-  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
-  const src = audioCtx.createBufferSource(); src.buffer = buf;
-  const ng = audioCtx.createGain(); ng.gain.value = vol * 0.25;
-  src.connect(ng).connect(audioCtx.destination); src.start(t0);
+  if (cfg.muted || cfg.volume <= 0) return;
+  ensureAudio();
+  if (!audioCtx) return;
+  const play = () => {
+    try {
+      const t0 = audioCtx.currentTime + when;
+      const vol = (cfg.volume / 100) * 0.9;
+      const partials = [[783.99, 1], [1567.98, 0.5], [2349.32, 0.25], [3135.96, 0.12]];
+      for (const [freq, gain] of partials) {
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        o.type = "sine";
+        o.frequency.value = freq;
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(Math.max(0.001, vol * gain), t0 + 0.006);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.0);
+        o.connect(g).connect(audioCtx.destination);
+        o.start(t0); o.stop(t0 + 1.1);
+      }
+      // 타격감(스트라이크)용 노이즈
+      const len = Math.floor(audioCtx.sampleRate * 0.03);
+      const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+      const src = audioCtx.createBufferSource(); src.buffer = buf;
+      const ng = audioCtx.createGain(); ng.gain.value = vol * 0.25;
+      src.connect(ng).connect(audioCtx.destination); src.start(t0);
+    } catch (e) {}
+  };
+  // 브라우저 정책으로 정지 상태면 재개된 뒤에 재생
+  if (audioCtx.state === "running") play();
+  else { try { audioCtx.resume().then(play).catch(() => {}); } catch (e) {} }
 }
 function bell() { ding(); }
+
+// 소리가 차단된 상태(첫 클릭 전 등)를 화면에 안내
+function updateAudioBanner() {
+  const el = $("audioHint");
+  if (!el) return;
+  const blocked = !cfg.muted && cfg.volume > 0 && (!audioCtx || audioCtx.state !== "running");
+  el.classList.toggle("hidden", !blocked);
+}
+setInterval(updateAudioBanner, 1000);
 
 /* ============================== timer core ============================== */
 function remaining() {
@@ -673,13 +702,15 @@ bindCheck("ckBellEnd", "bellEnd");
 bindCheck("ckWarnColor", "warnColor");
 bindCheck("ckOvertime", "overtime");
 $("inVolume").value = cfg.volume;
-$("inVolume").addEventListener("input", e => { cfg.volume = +e.target.value; saveCfg(); });
+$("inVolume").addEventListener("input", e => { cfg.volume = +e.target.value; saveCfg(); updateAudioBanner(); });
 $("btnTestBell").addEventListener("click", () => { ensureAudio(); ding(); });
 
 function setMuted(m) {
   cfg.muted = m; saveCfg();
   $("icoSoundOn").classList.toggle("hidden", m);
   $("icoSoundOff").classList.toggle("hidden", !m);
+  $("btnSound").classList.toggle("muted", m);
+  updateAudioBanner();
 }
 $("btnSound").addEventListener("click", () => { ensureAudio(); setMuted(!cfg.muted); });
 
@@ -759,8 +790,9 @@ async function updateWakeLock() {
 setInterval(updateWakeLock, 1000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) updateWakeLock(); });
 
-// 첫 상호작용에서 오디오 컨텍스트 준비 (브라우저 자동재생 정책)
-document.addEventListener("pointerdown", ensureAudio, { once: true });
+// 상호작용 시마다 오디오 컨텍스트 준비/재개 (브라우저 자동재생 정책 대응)
+["pointerdown", "keydown", "touchstart"].forEach(ev =>
+  document.addEventListener(ev, ensureAudio, { capture: true, passive: true }));
 
 /* ============================== init ============================== */
 state.durationMs = cfg.lastDurationMs;
