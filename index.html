@@ -342,7 +342,7 @@ const defaults = {
 };
 let cfg = { ...defaults };
 try { Object.assign(cfg, JSON.parse(localStorage.getItem("committee-timer") || "{}")); } catch (e) {}
-function saveCfg() { localStorage.setItem("committee-timer", JSON.stringify(cfg)); }
+function saveCfg() { try { localStorage.setItem("committee-timer", JSON.stringify(cfg)); } catch (e) {} }
 
 let bellFired = { b5: false, b1: false, end: false };
 let clockOffset = 0; // syncClock = Date.now() + clockOffset (server time when WS connected)
@@ -902,13 +902,16 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) upda
   document.addEventListener(ev, ensureAudio, { capture: true, passive: true }));
 
 /* ============================== init ============================== */
-state.durationMs = cfg.lastDurationMs;
-state.remainingMs = cfg.lastDurationMs;
-setMuted(cfg.muted);
-applyAppearance();
-syncTimeInputs();
-refreshFbStatus();
-if (cfg.room) { $("inRoom").value = cfg.room; joinRoom(cfg.room); }
+// 저장소가 막혀 있는 등 예상 못한 오류가 나더라도 화면은 항상 그려지도록 보호
+try {
+  state.durationMs = cfg.lastDurationMs;
+  state.remainingMs = cfg.lastDurationMs;
+  setMuted(cfg.muted);
+  applyAppearance();
+  syncTimeInputs();
+  refreshFbStatus();
+  if (cfg.room) { $("inRoom").value = cfg.room; joinRoom(cfg.room); }
+} catch (e) {}
 render();
 </script>
 </body>
