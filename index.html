@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>평가위원회 타이머</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%8F%B1%3C/text%3E%3C/svg%3E">
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js" defer></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js" defer></script>
 <style>
   :root{
     --bg:#0b0f1a;
@@ -274,11 +276,27 @@
 
   <h3>여러 화면 동기화</h3>
   <div class="row">
-    <input type="text" id="inRoom" placeholder="위원회 코드 (예: 2026기술평가1)" style="flex:1">
+    <input type="text" id="inRoom" placeholder="위원회 코드 (예: 1234)" style="flex:1">
     <button id="btnJoin" class="btn primary">연결</button>
   </div>
-  <p class="note">같은 코드를 입력한 모든 화면(다른 PC·태블릿 포함)에서 시작/정지/초기화/시간변경이 함께 움직입니다. 서버(server.js) 실행 중일 때는 기기 간 동기화, 그 외에는 같은 브라우저의 탭 간 동기화가 됩니다.</p>
+  <p class="note">같은 코드를 입력한 모든 화면에서 시작/정지/초기화/시간변경이 함께 움직입니다. 코드는 그날그날 바꿔도 됩니다.</p>
   <div id="syncStatus">동기화 꺼짐</div>
+
+  <p class="note" style="margin-top:14px">
+    <b>인터넷으로(다른 장소·다른 네트워크에서도) 동기화하려면</b> 아래에 무료 Firebase 설정을 붙여넣으세요. 비워두면 같은 네트워크에서 서버(server.js) 실행 시 동기화되고, 그것도 없으면 같은 브라우저 탭끼리만 동기화됩니다.
+  </p>
+  <ol class="note" style="padding-left:18px">
+    <li><a href="https://console.firebase.google.com/" target="_blank" rel="noopener">console.firebase.google.com</a>에서 무료 프로젝트 생성</li>
+    <li>빌드 → Realtime Database → 데이터베이스 만들기 (테스트 모드로 시작)</li>
+    <li>프로젝트 설정 → 내 앱 → 웹 앱 추가 → 표시되는 <code>firebaseConfig</code> 객체 전체를 복사</li>
+    <li>아래에 붙여넣고 저장</li>
+  </ol>
+  <textarea id="inFbConfig" rows="6" placeholder='{ apiKey: "...", authDomain: "...", databaseURL: "...", projectId: "...", appId: "..." }' style="width:100%;background:rgba(255,255,255,.08);color:inherit;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:monospace;font-size:12.5px;resize:vertical"></textarea>
+  <div class="row" style="margin-top:8px">
+    <button id="btnSaveFb" class="btn primary">저장</button>
+    <button id="btnClearFb" class="btn">삭제</button>
+    <span id="fbStatus" class="note" style="margin:0"></span>
+  </div>
 
   <h3>단축키</h3>
   <p class="note">
@@ -312,7 +330,7 @@ const defaults = {
   bell5: true, bell1: true, bellEnd: true, volume: 80, muted: false,
   weight: "700", fg: "#f5f7fa", bg: "#0b0f1a",
   warnColor: true, overtime: true,
-  lastDurationMs: 15 * 60000, room: ""
+  lastDurationMs: 15 * 60000, room: "", fbConfig: null
 };
 let cfg = { ...defaults };
 try { Object.assign(cfg, JSON.parse(localStorage.getItem("committee-timer") || "{}")); } catch (e) {}
@@ -536,6 +554,7 @@ setInterval(tick, 100);
 
 /* ============================== sync ============================== */
 let ws = null, wsOk = false, bc = null, roomId = "", wsRetry = 0;
+let fbApp = null, fbRef = null, fbOffsetRef = null, fbTries = 0, connGen = 0;
 
 function hashRoom(code) {
   // 코드(비밀번호)를 그대로 보내지 않도록 간단 해시
@@ -549,7 +568,8 @@ function hashRoom(code) {
 
 function broadcast() {
   const msg = { type: "state", state, sentAt: Date.now() };
-  if (wsOk) ws.send(JSON.stringify({ type: "update", state }));
+  if (fbRef) fbRef.set(state).catch(() => {});
+  else if (wsOk) ws.send(JSON.stringify({ type: "update", state }));
   else if (bc) bc.postMessage(msg);
 }
 
@@ -579,6 +599,39 @@ function setSyncStatus(txt, cls) {
   $("roomBadgeText").textContent = cfg.room;
 }
 
+function connectFirebase(gen) {
+  if (gen !== connGen) return; // 그 사이 방을 나가거나 다시 연결한 오래된 시도는 폐기
+  if (typeof firebase === "undefined") {
+    // CDN 스크립트가 아직(또는 끝내) 로드되지 않음 — 잠시 재시도 후 서버 동기화로 대체
+    if (fbTries++ < 20) { setTimeout(() => connectFirebase(gen), 150); return; }
+    setSyncStatus("Firebase 로드 실패 · 서버 동기화로 전환합니다", "local");
+    connectWs();
+    return;
+  }
+  try {
+    const name = "committee-timer";
+    fbApp = firebase.apps.find(a => a.name === name) || firebase.initializeApp(cfg.fbConfig, name);
+    const db = fbApp.database();
+    fbOffsetRef = db.ref(".info/serverTimeOffset");
+    fbOffsetRef.on("value", snap => { clockOffset = snap.val() || 0; });
+    fbRef = db.ref("committee-timer-rooms/" + roomId);
+    let first = true;
+    fbRef.on("value", snap => {
+      const val = snap.val();
+      setSyncStatus("인터넷 동기화 중 (Firebase)", "on");
+      if (val) applyRemote(val);
+      else if (first) broadcast(); // 방이 비어 있으면 내 상태로 초기화
+      first = false;
+    }, err => {
+      setSyncStatus("Firebase 오류: " + err.message + " · 서버 동기화로 전환합니다", "local");
+      fbRef = null;
+      connectWs();
+    });
+  } catch (e) {
+    setSyncStatus("Firebase 설정 오류: " + e.message, "local");
+    connectWs();
+  }
+}
 function connectWs() {
   if (!roomId || !/^https?:$/.test(location.protocol)) { fallbackBc(); return; }
   const url = (location.protocol === "https:" ? "wss://" : "ws://") + location.host;
@@ -620,13 +673,19 @@ function joinRoom(code) {
   if (!cfg.room) { setSyncStatus("동기화 꺼짐"); return; }
   roomId = hashRoom(cfg.room);
   $("btnJoin").textContent = "해제";
-  connectWs();
+  fbTries = 0;
+  const gen = ++connGen;
+  if (cfg.fbConfig) connectFirebase(gen);
+  else connectWs();
 }
 function leaveRoom(silent) {
+  connGen++; // 진행 중이던 Firebase 재시도가 있다면 폐기
   roomId = ""; wsOk = false; wsRetry = 99;
   clockOffset = 0;
   if (ws) { try { ws.close(); } catch (e) {} ws = null; }
   if (bc) { bc.close(); bc = null; }
+  if (fbRef) { try { fbRef.off(); } catch (e) {} fbRef = null; }
+  if (fbOffsetRef) { try { fbOffsetRef.off(); } catch (e) {} fbOffsetRef = null; }
   wsRetry = 0;
   $("btnJoin").textContent = "연결";
   if (!silent) { cfg.room = ""; saveCfg(); setSyncStatus("동기화 꺼짐"); }
@@ -678,7 +737,7 @@ for (const min of [5, 10, 15, 20, 30, 45, 60]) {
 
 // 설정 열고 닫기
 const panel = $("settings"), overlay = $("overlay");
-function openSettings() { panel.classList.add("open"); overlay.classList.add("open"); syncTimeInputs(); }
+function openSettings() { panel.classList.add("open"); overlay.classList.add("open"); syncTimeInputs(); refreshFbStatus(); }
 function closeSettings() { panel.classList.remove("open"); overlay.classList.remove("open"); }
 $("btnSettings").addEventListener("click", openSettings);
 $("btnCloseSettings").addEventListener("click", closeSettings);
@@ -735,6 +794,36 @@ $("btnJoin").addEventListener("click", () => {
   else joinRoom($("inRoom").value);
 });
 $("inRoom").addEventListener("keydown", e => { if (e.key === "Enter") $("btnJoin").click(); });
+
+// Firebase 설정 파싱: 콘솔에서 그대로 복사한 `const firebaseConfig = {...};` 형태도 허용
+function parseFbConfig(text) {
+  let s = text.trim();
+  if (!s) return null;
+  s = s.replace(/^(const|var|let)\s+\w+\s*=\s*/, "").replace(/;\s*$/, "");
+  s = s.replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":'); // 키에 따옴표 추가
+  s = s.replace(/'/g, '"').replace(/,(\s*[}\]])/g, "$1");        // 작은따옴표·trailing comma 정리
+  const obj = JSON.parse(s);
+  if (!obj.apiKey || !obj.databaseURL) throw new Error("apiKey / databaseURL 항목이 필요합니다");
+  return obj;
+}
+function refreshFbStatus() {
+  $("fbStatus").textContent = cfg.fbConfig
+    ? `저장됨 (프로젝트: ${cfg.fbConfig.projectId || "?"})`
+    : "설정 안 됨 · 서버/탭 동기화만 사용";
+}
+$("btnSaveFb").addEventListener("click", () => {
+  try {
+    const parsed = parseFbConfig($("inFbConfig").value);
+    cfg.fbConfig = parsed; saveCfg(); refreshFbStatus();
+    if (roomId) { const c = cfg.room; joinRoom(c); } // 켜져 있으면 재연결
+  } catch (e) {
+    $("fbStatus").textContent = "형식 오류: " + e.message;
+  }
+});
+$("btnClearFb").addEventListener("click", () => {
+  cfg.fbConfig = null; saveCfg(); $("inFbConfig").value = ""; refreshFbStatus();
+  if (roomId) { const c = cfg.room; joinRoom(c); }
+});
 
 // 전체화면
 function toggleFullscreen() {
@@ -800,6 +889,8 @@ state.remainingMs = cfg.lastDurationMs;
 setMuted(cfg.muted);
 applyAppearance();
 syncTimeInputs();
+if (cfg.fbConfig) $("inFbConfig").value = JSON.stringify(cfg.fbConfig, null, 2);
+refreshFbStatus();
 if (cfg.room) { $("inRoom").value = cfg.room; joinRoom(cfg.room); }
 render();
 </script>
