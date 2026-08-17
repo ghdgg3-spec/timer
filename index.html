@@ -276,35 +276,11 @@
 
   <h3>여러 화면 동기화</h3>
   <div class="row">
-    <input type="text" id="inRoom" placeholder="위원회 코드 (예: 1234)" style="flex:1">
+    <input type="text" id="inRoom" placeholder="코드 (예: 1234)" style="flex:1">
     <button id="btnJoin" class="btn primary">연결</button>
   </div>
-  <p class="note">같은 코드를 입력한 모든 화면에서 시작/정지/초기화/시간변경이 함께 움직입니다. 코드는 그날그날 바꿔도 됩니다. 인터넷 동기화가 기본으로 설정되어 있어 각 기기마다 따로 설정할 필요 없이 코드만 맞추면 됩니다.</p>
+  <p class="note">같은 코드를 입력한 모든 화면에서 시작/정지/초기화/시간변경이 함께 움직입니다.</p>
   <div id="syncStatus">동기화 꺼짐</div>
-
-  <div id="fbSetup">
-    <div id="fbHowTo">
-      <p class="note" style="margin-top:14px">
-        기본 제공되는 Firebase 설정이 없거나, <b>다른 Firebase 프로젝트를 직접 쓰고 싶다면</b> 아래에 붙여넣으세요.
-      </p>
-      <ol class="note" style="padding-left:18px">
-        <li><a href="https://console.firebase.google.com/" target="_blank" rel="noopener">console.firebase.google.com</a>에서 무료 프로젝트 생성</li>
-        <li>빌드 → Realtime Database → 데이터베이스 만들기 (위치는 asia-southeast1(싱가포르) 권장, 테스트 모드로 시작)</li>
-        <li>프로젝트 설정 → 내 앱 → 웹 앱 추가 → 표시되는 <code>firebaseConfig</code> 객체 전체를 복사</li>
-        <li>아래에 붙여넣고 저장</li>
-      </ol>
-    </div>
-    <textarea id="inFbConfig" rows="6" placeholder='{ apiKey: "...", authDomain: "...", databaseURL: "...", projectId: "...", appId: "..." }' style="width:100%;background:rgba(255,255,255,.08);color:inherit;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:monospace;font-size:12.5px;resize:vertical"></textarea>
-    <div class="row" style="margin-top:8px">
-      <button id="btnSaveFb" class="btn primary">저장</button>
-      <span id="fbStatus" class="note" style="margin:0"></span>
-    </div>
-  </div>
-  <div id="fbConfigured" class="row hidden" style="margin-top:14px">
-    <span class="note" id="fbConfiguredText" style="margin:0;flex:1">✅ Firebase 연결됨</span>
-    <button id="btnEditFb" class="btn">변경</button>
-    <button id="btnClearFb" class="btn hidden">기본값으로</button>
-  </div>
 
   <h3>단축키</h3>
   <p class="note">
@@ -335,7 +311,6 @@ const DEFAULT_FIREBASE_CONFIG = {
   appId: "1:1028670628110:web:51ebe0eb2833887882f75f",
   measurementId: "G-FNXRBQK4FE"
 };
-function effectiveFbConfig() { return cfg.fbConfig || DEFAULT_FIREBASE_CONFIG; }
 
 // shared timer state (synced across screens)
 let state = {
@@ -352,7 +327,7 @@ const defaults = {
   bell5: true, bell1: true, bellEnd: true, volume: 80, muted: false,
   weight: "700", fg: "#f5f7fa", bg: "#0b0f1a",
   warnColor: true, overtime: true,
-  lastDurationMs: 15 * 60000, room: "", fbConfig: null
+  lastDurationMs: 15 * 60000, room: ""
 };
 let cfg = { ...defaults };
 try { Object.assign(cfg, JSON.parse(localStorage.getItem("committee-timer") || "{}")); } catch (e) {}
@@ -632,7 +607,7 @@ function connectFirebase(gen) {
   }
   try {
     const name = "committee-timer-" + gen; // 설정이 바뀌었을 때 이전 연결을 그대로 재사용하지 않도록 매 연결마다 새 이름 사용
-    fbApp = firebase.initializeApp(effectiveFbConfig(), name);
+    fbApp = firebase.initializeApp(DEFAULT_FIREBASE_CONFIG, name);
     const db = fbApp.database();
     fbOffsetRef = db.ref(".info/serverTimeOffset");
     fbOffsetRef.on("value", snap => { clockOffset = snap.val() || 0; });
@@ -697,8 +672,7 @@ function joinRoom(code) {
   $("btnJoin").textContent = "해제";
   fbTries = 0;
   const gen = ++connGen;
-  if (effectiveFbConfig()) connectFirebase(gen);
-  else connectWs();
+  connectFirebase(gen);
 }
 function leaveRoom(silent) {
   connGen++; // 진행 중이던 Firebase 재시도가 있다면 폐기
@@ -759,7 +733,7 @@ for (const min of [5, 10, 15, 20, 30, 45, 60]) {
 
 // 설정 열고 닫기
 const panel = $("settings"), overlay = $("overlay");
-function openSettings() { panel.classList.add("open"); overlay.classList.add("open"); syncTimeInputs(); refreshFbStatus(); }
+function openSettings() { panel.classList.add("open"); overlay.classList.add("open"); syncTimeInputs(); }
 function closeSettings() { panel.classList.remove("open"); overlay.classList.remove("open"); }
 $("btnSettings").addEventListener("click", openSettings);
 $("btnCloseSettings").addEventListener("click", closeSettings);
@@ -816,50 +790,6 @@ $("btnJoin").addEventListener("click", () => {
   else joinRoom($("inRoom").value);
 });
 $("inRoom").addEventListener("keydown", e => { if (e.key === "Enter") $("btnJoin").click(); });
-
-// Firebase 설정 파싱: 콘솔에서 그대로 복사한 `const firebaseConfig = {...};` 형태도 허용
-function parseFbConfig(text) {
-  let s = text.trim();
-  if (!s) return null;
-  s = s.replace(/^(const|var|let)\s+\w+\s*=\s*/, "").replace(/;\s*$/, "");
-  s = s.replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":'); // 키에 따옴표 추가
-  s = s.replace(/'/g, '"').replace(/,(\s*[}\]])/g, "$1");        // 작은따옴표·trailing comma 정리
-  const obj = JSON.parse(s);
-  if (!obj.apiKey || !obj.databaseURL) throw new Error("apiKey / databaseURL 항목이 필요합니다");
-  return obj;
-}
-function refreshFbStatus() {
-  const eff = effectiveFbConfig();
-  $("fbSetup").classList.toggle("hidden", !!eff);
-  $("fbConfigured").classList.toggle("hidden", !eff);
-  if (eff) {
-    const source = cfg.fbConfig ? "" : " (기본 제공, 별도 설정 불필요)";
-    $("fbConfiguredText").textContent = `✅ Firebase 연결됨 (프로젝트: ${eff.projectId || "?"})${source}`;
-  }
-  $("btnClearFb").classList.toggle("hidden", !cfg.fbConfig);
-}
-$("btnSaveFb").addEventListener("click", () => {
-  try {
-    const parsed = parseFbConfig($("inFbConfig").value);
-    if (!parsed) throw new Error("설정 내용을 입력하세요");
-    cfg.fbConfig = parsed; saveCfg();
-    $("fbStatus").textContent = "";
-    $("inFbConfig").value = ""; // 저장 후엔 화면에 키가 노출되지 않도록 비움
-    refreshFbStatus();
-    if (roomId) { const c = cfg.room; joinRoom(c); } // 켜져 있으면 재연결
-  } catch (e) {
-    $("fbStatus").textContent = "형식 오류: " + e.message;
-  }
-});
-$("btnEditFb").addEventListener("click", () => {
-  $("inFbConfig").value = JSON.stringify(effectiveFbConfig(), null, 2);
-  $("fbSetup").classList.remove("hidden");
-  $("fbConfigured").classList.add("hidden");
-});
-$("btnClearFb").addEventListener("click", () => {
-  cfg.fbConfig = null; saveCfg(); $("inFbConfig").value = ""; refreshFbStatus();
-  if (roomId) { const c = cfg.room; joinRoom(c); }
-});
 
 // 전체화면
 function toggleFullscreen() {
@@ -927,7 +857,6 @@ try {
   setMuted(cfg.muted);
   applyAppearance();
   syncTimeInputs();
-  refreshFbStatus();
   if (cfg.room) { $("inRoom").value = cfg.room; joinRoom(cfg.room); }
 } catch (e) {}
 render();
