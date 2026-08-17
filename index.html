@@ -279,13 +279,13 @@
     <input type="text" id="inRoom" placeholder="위원회 코드 (예: 1234)" style="flex:1">
     <button id="btnJoin" class="btn primary">연결</button>
   </div>
-  <p class="note">같은 코드를 입력한 모든 화면에서 시작/정지/초기화/시간변경이 함께 움직입니다. 코드는 그날그날 바꿔도 됩니다.</p>
+  <p class="note">같은 코드를 입력한 모든 화면에서 시작/정지/초기화/시간변경이 함께 움직입니다. 코드는 그날그날 바꿔도 됩니다. 인터넷 동기화가 기본으로 설정되어 있어 각 기기마다 따로 설정할 필요 없이 코드만 맞추면 됩니다.</p>
   <div id="syncStatus">동기화 꺼짐</div>
 
   <div id="fbSetup">
     <div id="fbHowTo">
       <p class="note" style="margin-top:14px">
-        <b>인터넷으로(다른 장소·다른 네트워크에서도) 동기화하려면</b> 아래에 무료 Firebase 설정을 붙여넣으세요. 비워두면 같은 네트워크에서 서버(server.js) 실행 시 동기화되고, 그것도 없으면 같은 브라우저 탭끼리만 동기화됩니다.
+        기본 제공되는 Firebase 설정이 없거나, <b>다른 Firebase 프로젝트를 직접 쓰고 싶다면</b> 아래에 붙여넣으세요.
       </p>
       <ol class="note" style="padding-left:18px">
         <li><a href="https://console.firebase.google.com/" target="_blank" rel="noopener">console.firebase.google.com</a>에서 무료 프로젝트 생성</li>
@@ -303,7 +303,7 @@
   <div id="fbConfigured" class="row hidden" style="margin-top:14px">
     <span class="note" id="fbConfiguredText" style="margin:0;flex:1">✅ Firebase 연결됨</span>
     <button id="btnEditFb" class="btn">변경</button>
-    <button id="btnClearFb" class="btn">삭제</button>
+    <button id="btnClearFb" class="btn hidden">기본값으로</button>
   </div>
 
   <h3>단축키</h3>
@@ -322,6 +322,20 @@ const $ = id => document.getElementById(id);
 
 /* ============================== state ============================== */
 const clientId = Math.random().toString(36).slice(2, 10);
+
+// 기본 제공 Firebase 프로젝트 — 각 기기에서 따로 설정하지 않아도 이 설정으로 인터넷 동기화가 됩니다.
+// (Firebase 클라이언트 설정값은 원래 공개되는 값이며, 보안은 데이터베이스 규칙으로 걸립니다.)
+const DEFAULT_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCBg4nmTlFdkjzx4LbvXhD-8Bz-Hg4uO2c",
+  authDomain: "timer-acddb.firebaseapp.com",
+  databaseURL: "https://timer-acddb-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "timer-acddb",
+  storageBucket: "timer-acddb.firebasestorage.app",
+  messagingSenderId: "1028670628110",
+  appId: "1:1028670628110:web:51ebe0eb2833887882f75f",
+  measurementId: "G-FNXRBQK4FE"
+};
+function effectiveFbConfig() { return cfg.fbConfig || DEFAULT_FIREBASE_CONFIG; }
 
 // shared timer state (synced across screens)
 let state = {
@@ -617,8 +631,8 @@ function connectFirebase(gen) {
     return;
   }
   try {
-    const name = "committee-timer";
-    fbApp = firebase.apps.find(a => a.name === name) || firebase.initializeApp(cfg.fbConfig, name);
+    const name = "committee-timer-" + gen; // 설정이 바뀌었을 때 이전 연결을 그대로 재사용하지 않도록 매 연결마다 새 이름 사용
+    fbApp = firebase.initializeApp(effectiveFbConfig(), name);
     const db = fbApp.database();
     fbOffsetRef = db.ref(".info/serverTimeOffset");
     fbOffsetRef.on("value", snap => { clockOffset = snap.val() || 0; });
@@ -683,7 +697,7 @@ function joinRoom(code) {
   $("btnJoin").textContent = "해제";
   fbTries = 0;
   const gen = ++connGen;
-  if (cfg.fbConfig) connectFirebase(gen);
+  if (effectiveFbConfig()) connectFirebase(gen);
   else connectWs();
 }
 function leaveRoom(silent) {
@@ -815,10 +829,14 @@ function parseFbConfig(text) {
   return obj;
 }
 function refreshFbStatus() {
-  const has = !!cfg.fbConfig;
-  $("fbSetup").classList.toggle("hidden", has);
-  $("fbConfigured").classList.toggle("hidden", !has);
-  if (has) $("fbConfiguredText").textContent = `✅ Firebase 연결됨 (프로젝트: ${cfg.fbConfig.projectId || "?"})`;
+  const eff = effectiveFbConfig();
+  $("fbSetup").classList.toggle("hidden", !!eff);
+  $("fbConfigured").classList.toggle("hidden", !eff);
+  if (eff) {
+    const source = cfg.fbConfig ? "" : " (기본 제공, 별도 설정 불필요)";
+    $("fbConfiguredText").textContent = `✅ Firebase 연결됨 (프로젝트: ${eff.projectId || "?"})${source}`;
+  }
+  $("btnClearFb").classList.toggle("hidden", !cfg.fbConfig);
 }
 $("btnSaveFb").addEventListener("click", () => {
   try {
@@ -834,7 +852,7 @@ $("btnSaveFb").addEventListener("click", () => {
   }
 });
 $("btnEditFb").addEventListener("click", () => {
-  $("inFbConfig").value = JSON.stringify(cfg.fbConfig, null, 2);
+  $("inFbConfig").value = JSON.stringify(effectiveFbConfig(), null, 2);
   $("fbSetup").classList.remove("hidden");
   $("fbConfigured").classList.add("hidden");
 });
