@@ -282,22 +282,28 @@
   <p class="note">같은 코드를 입력한 모든 화면에서 시작/정지/초기화/시간변경이 함께 움직입니다. 코드는 그날그날 바꿔도 됩니다.</p>
   <div id="syncStatus">동기화 꺼짐</div>
 
-  <div id="fbHowTo">
-    <p class="note" style="margin-top:14px">
-      <b>인터넷으로(다른 장소·다른 네트워크에서도) 동기화하려면</b> 아래에 무료 Firebase 설정을 붙여넣으세요. 비워두면 같은 네트워크에서 서버(server.js) 실행 시 동기화되고, 그것도 없으면 같은 브라우저 탭끼리만 동기화됩니다.
-    </p>
-    <ol class="note" style="padding-left:18px">
-      <li><a href="https://console.firebase.google.com/" target="_blank" rel="noopener">console.firebase.google.com</a>에서 무료 프로젝트 생성</li>
-      <li>빌드 → Realtime Database → 데이터베이스 만들기 (위치는 asia-southeast1(싱가포르) 권장, 테스트 모드로 시작)</li>
-      <li>프로젝트 설정 → 내 앱 → 웹 앱 추가 → 표시되는 <code>firebaseConfig</code> 객체 전체를 복사</li>
-      <li>아래에 붙여넣고 저장</li>
-    </ol>
+  <div id="fbSetup">
+    <div id="fbHowTo">
+      <p class="note" style="margin-top:14px">
+        <b>인터넷으로(다른 장소·다른 네트워크에서도) 동기화하려면</b> 아래에 무료 Firebase 설정을 붙여넣으세요. 비워두면 같은 네트워크에서 서버(server.js) 실행 시 동기화되고, 그것도 없으면 같은 브라우저 탭끼리만 동기화됩니다.
+      </p>
+      <ol class="note" style="padding-left:18px">
+        <li><a href="https://console.firebase.google.com/" target="_blank" rel="noopener">console.firebase.google.com</a>에서 무료 프로젝트 생성</li>
+        <li>빌드 → Realtime Database → 데이터베이스 만들기 (위치는 asia-southeast1(싱가포르) 권장, 테스트 모드로 시작)</li>
+        <li>프로젝트 설정 → 내 앱 → 웹 앱 추가 → 표시되는 <code>firebaseConfig</code> 객체 전체를 복사</li>
+        <li>아래에 붙여넣고 저장</li>
+      </ol>
+    </div>
+    <textarea id="inFbConfig" rows="6" placeholder='{ apiKey: "...", authDomain: "...", databaseURL: "...", projectId: "...", appId: "..." }' style="width:100%;background:rgba(255,255,255,.08);color:inherit;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:monospace;font-size:12.5px;resize:vertical"></textarea>
+    <div class="row" style="margin-top:8px">
+      <button id="btnSaveFb" class="btn primary">저장</button>
+      <span id="fbStatus" class="note" style="margin:0"></span>
+    </div>
   </div>
-  <textarea id="inFbConfig" rows="6" placeholder='{ apiKey: "...", authDomain: "...", databaseURL: "...", projectId: "...", appId: "..." }' style="width:100%;background:rgba(255,255,255,.08);color:inherit;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:monospace;font-size:12.5px;resize:vertical"></textarea>
-  <div class="row" style="margin-top:8px">
-    <button id="btnSaveFb" class="btn primary">저장</button>
+  <div id="fbConfigured" class="row hidden" style="margin-top:14px">
+    <span class="note" id="fbConfiguredText" style="margin:0;flex:1">✅ Firebase 연결됨</span>
+    <button id="btnEditFb" class="btn">변경</button>
     <button id="btnClearFb" class="btn">삭제</button>
-    <span id="fbStatus" class="note" style="margin:0"></span>
   </div>
 
   <h3>단축키</h3>
@@ -809,19 +815,28 @@ function parseFbConfig(text) {
   return obj;
 }
 function refreshFbStatus() {
-  $("fbStatus").textContent = cfg.fbConfig
-    ? `저장됨 (프로젝트: ${cfg.fbConfig.projectId || "?"})`
-    : "설정 안 됨 · 서버/탭 동기화만 사용";
-  $("fbHowTo").classList.toggle("hidden", !!cfg.fbConfig);
+  const has = !!cfg.fbConfig;
+  $("fbSetup").classList.toggle("hidden", has);
+  $("fbConfigured").classList.toggle("hidden", !has);
+  if (has) $("fbConfiguredText").textContent = `✅ Firebase 연결됨 (프로젝트: ${cfg.fbConfig.projectId || "?"})`;
 }
 $("btnSaveFb").addEventListener("click", () => {
   try {
     const parsed = parseFbConfig($("inFbConfig").value);
-    cfg.fbConfig = parsed; saveCfg(); refreshFbStatus();
+    if (!parsed) throw new Error("설정 내용을 입력하세요");
+    cfg.fbConfig = parsed; saveCfg();
+    $("fbStatus").textContent = "";
+    $("inFbConfig").value = ""; // 저장 후엔 화면에 키가 노출되지 않도록 비움
+    refreshFbStatus();
     if (roomId) { const c = cfg.room; joinRoom(c); } // 켜져 있으면 재연결
   } catch (e) {
     $("fbStatus").textContent = "형식 오류: " + e.message;
   }
+});
+$("btnEditFb").addEventListener("click", () => {
+  $("inFbConfig").value = JSON.stringify(cfg.fbConfig, null, 2);
+  $("fbSetup").classList.remove("hidden");
+  $("fbConfigured").classList.add("hidden");
 });
 $("btnClearFb").addEventListener("click", () => {
   cfg.fbConfig = null; saveCfg(); $("inFbConfig").value = ""; refreshFbStatus();
@@ -892,7 +907,6 @@ state.remainingMs = cfg.lastDurationMs;
 setMuted(cfg.muted);
 applyAppearance();
 syncTimeInputs();
-if (cfg.fbConfig) $("inFbConfig").value = JSON.stringify(cfg.fbConfig, null, 2);
 refreshFbStatus();
 if (cfg.room) { $("inRoom").value = cfg.room; joinRoom(cfg.room); }
 render();
